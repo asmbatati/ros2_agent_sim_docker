@@ -135,27 +135,69 @@ export GZ_SIM_SYSTEM_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/gz-sim-8/plugins:$GZ_
 export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
 # =============================================================================
-# Qt6 and Graphics Environment Setup (Ubuntu 24.04)
+# Qt6 and Graphics Environment Setup (Ubuntu 24.04) - WSLg aware
 # =============================================================================
 
-# Qt6 Environment Variables (resolves Qt5/Qt6 conflicts)
-export QT_QPA_PLATFORM=xcb
+# Common Qt6 environment variables (safe for both X11 and Wayland)
 export QT_X11_NO_MITSHM=1
 export QT_AUTO_SCREEN_SCALE_FACTOR=0
 export QT_SCALE_FACTOR=1
 export QT_QPA_PLATFORM_PLUGIN_PATH="/usr/lib/x86_64-linux-gnu/qt6/plugins/platforms:/usr/lib/x86_64-linux-gnu/qt6/plugins"
 
-# OpenGL and Mesa Environment (enables software rendering for Ubuntu 24.04)
+# Common GL flags (do NOT force software by default)
 export LIBGL_ALWAYS_INDIRECT=0
 export LIBGL_ALWAYS_SOFTWARE=0
-export MESA_GL_VERSION_OVERRIDE="4.5"
-export MESA_GLSL_VERSION_OVERRIDE="450"
-export GALLIUM_DRIVER="llvmpipe"
 
-# Graphics system environment
-export XDG_RUNTIME_DIR="/tmp/runtime-user"
-export XDG_SESSION_TYPE="x11"
-export WAYLAND_DISPLAY=""
+# Detect WSLg (Wayland compositor + WSLg mount)
+IS_WSLG=0
+if [ -d /mnt/wslg ]; then
+  IS_WSLG=1
+fi
+
+# -----------------------------------------------------------------------------
+# WSLg / Wayland path
+# -----------------------------------------------------------------------------
+if [ "$IS_WSLG" -eq 1 ]; then
+  # Prefer Wayland for Qt on WSLg
+  export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
+
+  # Keep these if already provided by environment; otherwise set sensible defaults
+  export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/mnt/wslg/runtime-dir}"
+  export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
+
+  # Ensure X11 apps can still display via Xwayland socket
+  export DISPLAY="${DISPLAY:-:0}"
+
+  # If WSL graphics libs exist, prefer Mesa D3D12 driver path (often avoids llvmpipe)
+  if [ -d /usr/lib/wsl ]; then
+    export LD_LIBRARY_PATH="/usr/lib/wsl/lib:${LD_LIBRARY_PATH}"
+    export MESA_LOADER_DRIVER_OVERRIDE="${MESA_LOADER_DRIVER_OVERRIDE:-d3d12}"
+    export GALLIUM_DRIVER="${GALLIUM_DRIVER:-d3d12}"
+  fi
+
+  # IMPORTANT: do NOT set Mesa version overrides here
+  # IMPORTANT: do NOT set GALLIUM_DRIVER=llvmpipe here
+
+# -----------------------------------------------------------------------------
+# Native Linux / X11 fallback
+# -----------------------------------------------------------------------------
+else
+  export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+
+  # X11 runtime defaults
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-user}"
+  export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-x11}"
+  export WAYLAND_DISPLAY=""
+
+  # Optional Mesa overrides (ONLY if you really need them for compatibility)
+  export MESA_GL_VERSION_OVERRIDE="${MESA_GL_VERSION_OVERRIDE:-4.5}"
+  export MESA_GLSL_VERSION_OVERRIDE="${MESA_GLSL_VERSION_OVERRIDE:-450}"
+
+  # Optional software fallback (ONLY if needed; comment out by default)
+  # export GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}"
+fi
+
 
 # =============================================================================
 # X11 GUI Environment Setup with Auto-Detection
@@ -248,9 +290,9 @@ start_gazebo_sim() {
         fi
     fi
     
-    # Set Qt6 environment for Gazebo
-    export QT_QPA_PLATFORM=xcb
-    export QT_X11_NO_MITSHM=1
+    # Set Qt6 environment for Gazebo (respect global settings)
+    # export QT_QPA_PLATFORM=xcb  # Removed to support Wayland/WSLg
+    # export QT_X11_NO_MITSHM=1   # Removed (set globally)
     
     # Try normal Gazebo with Qt6 support
     echo "🎯 Launching Gazebo Harmonic with Qt6 on $DISPLAY..."
@@ -463,8 +505,8 @@ else
 fi
 
 # Check Qt6 environment
-if [ -n "$QT_QPA_PLATFORM" ] && [ "$QT_QPA_PLATFORM" = "xcb" ]; then
-    echo "   ✅ Qt6 environment configured"
+if [ -n "$QT_QPA_PLATFORM" ]; then
+    echo "   ✅ Qt6 environment configured ($QT_QPA_PLATFORM)"
 else
     echo "   ⚠️  Qt6 environment not properly configured"
 fi

@@ -112,6 +112,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb \
     x11vnc \
     \
+    # Vulkan Support
+    vulkan-tools \
+    libvulkan1 \
+    mesa-vulkan-drivers \
+    \
     # Core OpenGL and Mesa Libraries (Ubuntu 24.04 compatible)
     libgl1-mesa-dri \
     libgl1 \
@@ -368,27 +373,27 @@ RUN set -e && \
     echo "Installing ARM GCC toolchain..." && \
     # Method 1: Try the official ARM release 
     (wget -O /tmp/gcc-arm-none-eabi.tar.bz2 \
-        "https://developer.arm.com/-/media/Files/downloads/gnu-rm/10.3-2021.10/gcc-arm-none-eabi-10.3-2021.10-x86_64-linux.tar.bz2" && \
-     tar -jxf /tmp/gcc-arm-none-eabi.tar.bz2 -C /opt/ && \
-     rm /tmp/gcc-arm-none-eabi.tar.bz2 && \
-     echo "✅ ARM GCC installed from official ARM site") || \
+    "https://developer.arm.com/-/media/Files/downloads/gnu-rm/10.3-2021.10/gcc-arm-none-eabi-10.3-2021.10-x86_64-linux.tar.bz2" && \
+    tar -jxf /tmp/gcc-arm-none-eabi.tar.bz2 -C /opt/ && \
+    rm /tmp/gcc-arm-none-eabi.tar.bz2 && \
+    echo "✅ ARM GCC installed from official ARM site") || \
     # Method 2: Try alternative mirror
     (wget -O /tmp/gcc-arm-none-eabi.tar.bz2 \
-        "https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu-rm/10.3-2021.07/gcc-arm-none-eabi-10.3-2021.07-x86_64-linux.tar.bz2" && \
-     tar -jxf /tmp/gcc-arm-none-eabi.tar.bz2 -C /opt/ && \
-     rm /tmp/gcc-arm-none-eabi.tar.bz2 && \
-     echo "✅ ARM GCC installed from alternative mirror") || \
+    "https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu-rm/10.3-2021.07/gcc-arm-none-eabi-10.3-2021.07-x86_64-linux.tar.bz2" && \
+    tar -jxf /tmp/gcc-arm-none-eabi.tar.bz2 -C /opt/ && \
+    rm /tmp/gcc-arm-none-eabi.tar.bz2 && \
+    echo "✅ ARM GCC installed from alternative mirror") || \
     # Method 3: Use system package manager as fallback
     (apt-get update && \
-     apt-get install -y --no-install-recommends gcc-arm-none-eabi && \
-     rm -rf /var/lib/apt/lists/* && \
-     echo "✅ ARM GCC installed from system packages") || \
+    apt-get install -y --no-install-recommends gcc-arm-none-eabi && \
+    rm -rf /var/lib/apt/lists/* && \
+    echo "✅ ARM GCC installed from system packages") || \
     # Method 4: Download from GitHub releases
     (wget -O /tmp/gcc-arm-none-eabi.tar.gz \
-        "https://github.com/xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/v10.3.1-2.3/xpack-arm-none-eabi-gcc-10.3.1-2.3-linux-x64.tar.gz" && \
-     tar -zxf /tmp/gcc-arm-none-eabi.tar.gz -C /opt/ && \
-     rm /tmp/gcc-arm-none-eabi.tar.gz && \
-     echo "✅ ARM GCC installed from GitHub releases") || \
+    "https://github.com/xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/v10.3.1-2.3/xpack-arm-none-eabi-gcc-10.3.1-2.3-linux-x64.tar.gz" && \
+    tar -zxf /tmp/gcc-arm-none-eabi.tar.gz -C /opt/ && \
+    rm /tmp/gcc-arm-none-eabi.tar.gz && \
+    echo "✅ ARM GCC installed from GitHub releases") || \
     # If all methods fail, show error
     (echo "❌ All ARM GCC installation methods failed" && exit 1)
 
@@ -412,13 +417,13 @@ RUN update-alternatives --set java $(update-alternatives --list java | grep "jav
 
 # Create user with proper permissions
 RUN if id -u 1000 >/dev/null 2>&1; then \
-        EXISTING_USER=$(id -nu 1000) && \
-        if [ "$EXISTING_USER" != "user" ]; then \
-            userdel -r $EXISTING_USER 2>/dev/null || true; \
-        fi; \
+    EXISTING_USER=$(id -nu 1000) && \
+    if [ "$EXISTING_USER" != "user" ]; then \
+    userdel -r $EXISTING_USER 2>/dev/null || true; \
+    fi; \
     fi && \
     if ! id user >/dev/null 2>&1; then \
-        useradd --shell /bin/bash -u 1000 -c "" -m user; \
+    useradd --shell /bin/bash -u 1000 -c "" -m user; \
     fi && \
     usermod -a -G dialout user && \
     echo "user:user" | chpasswd && \
@@ -476,6 +481,8 @@ RUN pip3 install --break-system-packages --ignore-installed --no-cache-dir \
 # ============================================================================
 # PHASE 14: Ollama Installation + LLM Models
 # ============================================================================
+RUN apt-get update && apt-get install -y --no-install-recommends zstd \
+    && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://ollama.com/install.sh | sh
 
 # ============================================================================
@@ -537,25 +544,25 @@ ARG GITHUB_TOKEN
 # Clone ros2_agent_sim with robust submodule handling (only if token provided)
 RUN cd /home/user/ros2_ws/src && \
     if [ -n "$GITHUB_TOKEN" ]; then \
-        echo "=== GitHub token provided, cloning ros2_agent_sim ==="; \
-        git clone https://${GITHUB_TOKEN}@github.com/AbdullahGM1/ros2_agent_sim.git && \
-        cd ros2_agent_sim && \
-        echo "=== Initializing submodules with error handling ===" && \
-        git submodule init && \
-        for submodule in $(git submodule status | awk '{print $2}'); do \
-            echo "Processing submodule: $submodule"; \
-            if git submodule update "$submodule"; then \
-                echo "✅ Successfully updated $submodule"; \
-            else \
-                echo "⚠️ Failed to update $submodule, trying to reset to HEAD"; \
-                cd "$submodule" 2>/dev/null && git fetch origin && git reset --hard origin/HEAD && cd .. || \
-                echo "❌ Submodule $submodule failed - continuing without it"; \
-            fi; \
-        done && \
-        echo "✅ Submodule initialization completed"; \
+    echo "=== GitHub token provided, cloning ros2_agent_sim ==="; \
+    git clone https://${GITHUB_TOKEN}@github.com/AbdullahGM1/ros2_agent_sim.git && \
+    cd ros2_agent_sim && \
+    echo "=== Initializing submodules with error handling ===" && \
+    git submodule init && \
+    for submodule in $(git submodule status | awk '{print $2}'); do \
+    echo "Processing submodule: $submodule"; \
+    if git submodule update "$submodule"; then \
+    echo "✅ Successfully updated $submodule"; \
     else \
-        echo "⚠️ No GitHub token provided, skipping ros2_agent_sim clone"; \
-        echo "   To include ros2_agent_sim, build with: --build-arg GITHUB_TOKEN=your_token"; \
+    echo "⚠️ Failed to update $submodule, trying to reset to HEAD"; \
+    cd "$submodule" 2>/dev/null && git fetch origin && git reset --hard origin/HEAD && cd .. || \
+    echo "❌ Submodule $submodule failed - continuing without it"; \
+    fi; \
+    done && \
+    echo "✅ Submodule initialization completed"; \
+    else \
+    echo "⚠️ No GitHub token provided, skipping ros2_agent_sim clone"; \
+    echo "   To include ros2_agent_sim, build with: --build-arg GITHUB_TOKEN=your_token"; \
     fi
 
 # Clone, configure, and build the PX4-Autopilot firmware
@@ -601,8 +608,8 @@ RUN cd /home/user/ros2_ws/src && \
 
 # gz_sim dependencies in Unitree packages 
 RUN if [ -d "/home/user/ros2_ws/src/unitree_go2_ros2" ]; then \
-        find /home/user/ros2_ws/src/unitree_go2_ros2 -name "package.xml" -exec sed -i '/<.*depend>gz_sim<\/.*depend>/d' {} \; && \
-        find /home/user/ros2_ws/src/unitree_go2_ros2 -name "package.xml" -exec sed -i '/<.*depend>gz-sim<\/.*depend>/d' {} \; ; \
+    find /home/user/ros2_ws/src/unitree_go2_ros2 -name "package.xml" -exec sed -i '/<.*depend>gz_sim<\/.*depend>/d' {} \; && \
+    find /home/user/ros2_ws/src/unitree_go2_ros2 -name "package.xml" -exec sed -i '/<.*depend>gz-sim<\/.*depend>/d' {} \; ; \
     fi
 
 # Set proper ownership and executable permissions
@@ -648,27 +655,44 @@ RUN mkdir -p /home/user/shared_volume && \
 USER user
 WORKDIR /home/user
 
-# Setup user bashrc with proper Qt6 and graphics environment
-RUN echo "# ROS2 Jazzy + Gazebo Harmonic + Qt6 Environment" >> ~/.bashrc && \
-    echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \
-    echo "export PATH=\$HOME/.local/bin:\$PATH" >> ~/.bashrc && \
-    echo "export GZ_VERSION=harmonic" >> ~/.bashrc && \
-    echo "export ROS_DOMAIN_ID=0" >> ~/.bashrc && \
-    echo "export DEV_DIR=/home/user/shared_volume" >> ~/.bashrc && \
-    echo "export PX4_DIR=\$DEV_DIR/PX4-Autopilot" >> ~/.bashrc && \
-    echo "export ROS2_WS=\$DEV_DIR/ros2_ws" >> ~/.bashrc && \
-    echo "export OSQP_SRC=\$DEV_DIR" >> ~/.bashrc && \
-    echo "" >> ~/.bashrc && \
-    echo "# Qt6 and Graphics Environment" >> ~/.bashrc && \
-    echo "export QT_QPA_PLATFORM=xcb" >> ~/.bashrc && \
-    echo "export QT_X11_NO_MITSHM=1" >> ~/.bashrc && \
-    echo "export LIBGL_ALWAYS_INDIRECT=0" >> ~/.bashrc && \
-    echo "export MESA_GL_VERSION_OVERRIDE=4.5" >> ~/.bashrc && \
-    echo "export MESA_GLSL_VERSION_OVERRIDE=450" >> ~/.bashrc && \
-    echo "export GALLIUM_DRIVER=llvmpipe" >> ~/.bashrc && \
-    echo "" >> ~/.bashrc && \
-    echo "# Source workspace if available" >> ~/.bashrc && \
-    echo 'if [ -f "$ROS2_WS/install/setup.bash" ]; then source "$ROS2_WS/install/setup.bash"; fi' >> ~/.bashrc
+# Setup user bashrc with ROS2 + Gazebo + Qt6, WSLg-aware (no forced llvmpipe)
+RUN { \
+    echo "# ROS2 Jazzy + Gazebo Harmonic + Qt6 Environment"; \
+    echo "source /opt/ros/jazzy/setup.bash"; \
+    echo "export PATH=\$HOME/.local/bin:\$PATH"; \
+    echo "export GZ_VERSION=harmonic"; \
+    echo "export ROS_DOMAIN_ID=0"; \
+    echo "export DEV_DIR=/home/user/shared_volume"; \
+    echo "export PX4_DIR=\$DEV_DIR/PX4-Autopilot"; \
+    echo "export ROS2_WS=\$DEV_DIR/ros2_ws"; \
+    echo "export OSQP_SRC=\$DEV_DIR"; \
+    echo ""; \
+    echo "# Qt6 / Graphics (WSLg-aware)"; \
+    echo "export QT_X11_NO_MITSHM=1"; \
+    echo "export LIBGL_ALWAYS_INDIRECT=0"; \
+    echo "export LIBGL_ALWAYS_SOFTWARE=0"; \
+    echo ""; \
+    echo "# If WSLg is available, prefer Wayland and avoid forcing software rendering"; \
+    echo 'if [ -d /mnt/wslg ] && [ -n "${WAYLAND_DISPLAY:-}" ]; then'; \
+    echo '  export QT_QPA_PLATFORM=wayland'; \
+    echo '  export XDG_SESSION_TYPE=wayland'; \
+    echo '  # Keep XDG_RUNTIME_DIR and WAYLAND_DISPLAY from environment (do not overwrite)'; \
+    echo '  # Optional: Try Mesa D3D12 path when available'; \
+    echo '  if [ -d /usr/lib/wsl ]; then'; \
+    echo '    export LD_LIBRARY_PATH=/usr/lib/wsl/lib:${LD_LIBRARY_PATH}'; \
+    echo '    export MESA_LOADER_DRIVER_OVERRIDE=d3d12'; \
+    echo '    export GALLIUM_DRIVER=d3d12'; \
+    echo '  fi'; \
+    echo 'else'; \
+    echo '  # Native Linux / X11 fallback'; \
+    echo '  export QT_QPA_PLATFORM=xcb'; \
+    echo '  export XDG_SESSION_TYPE=x11'; \
+    echo 'fi'; \
+    echo ""; \
+    echo "# Source workspace if available"; \
+    echo 'if [ -f "$ROS2_WS/install/setup.bash" ]; then source "$ROS2_WS/install/setup.bash"; fi'; \
+    } >> /home/user/.bashrc
+
 
 # ============================================================================
 # PHASE 20: Health Check and Finalization

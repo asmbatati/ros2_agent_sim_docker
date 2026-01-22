@@ -21,6 +21,37 @@ print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+# Function to setup WSL Docker configuration
+setup_wsl_docker_config() {
+    # Check for WSL environment
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        print_info "🪟 WSL environment detected, checking Docker config..."
+        
+        WSL_DOCKER_DIR="$HOME/.docker-wsl"
+        WSL_DOCKER_CONFIG="$WSL_DOCKER_DIR/config.json"
+        # Assuming script is run from repo root as enforced by build_image
+        SOURCE_CONFIG="./scripts/.docker-wsl/config.json"
+        
+        if [ ! -f "$WSL_DOCKER_CONFIG" ]; then
+             print_warning "WSL Docker config not found at $WSL_DOCKER_CONFIG"
+             if [ -f "$SOURCE_CONFIG" ]; then
+                 print_info "Copying default config from $SOURCE_CONFIG"
+                 mkdir -p "$WSL_DOCKER_DIR"
+                 cp "$SOURCE_CONFIG" "$WSL_DOCKER_CONFIG"
+                 print_success "Created $WSL_DOCKER_CONFIG"
+             else
+                 print_error "Source config not found at $SOURCE_CONFIG"
+                 # Don't exit, maybe user wants to proceed without it
+             fi
+        fi
+        
+        if [ -f "$WSL_DOCKER_CONFIG" ]; then
+            export DOCKER_CONFIG="$WSL_DOCKER_DIR"
+            print_success "Set DOCKER_CONFIG=$DOCKER_CONFIG"
+        fi
+    fi
+}
+
 # Function to check if Docker is installed and running
 check_docker() {
     if ! command -v docker &> /dev/null; then
@@ -129,116 +160,40 @@ setup_gpu_support() {
 
 # Enhanced X11 authentication and graphics setup
 setup_x11_auth() {
-    print_info "🖥️  Setting up comprehensive X11 authentication..."
-    
-    # Enhanced display detection
-    print_info "Auto-detecting available X11 displays..."
-    AVAILABLE_DISPLAYS=""
-    
-    # Test function with timeout
-    test_display() {
-        local disp="$1"
-        timeout 3 bash -c "DISPLAY='$disp' xset q" >/dev/null 2>&1
-    }
-    
-    # Check common display locations with priority order
-    DISPLAY_CANDIDATES=":1 :0 :10 :2 :1003 :11 :12"
-    
-    for disp in $DISPLAY_CANDIDATES; do
-        if test_display "$disp"; then
-            AVAILABLE_DISPLAYS="$AVAILABLE_DISPLAYS $disp"
-            print_success "Found working display: $disp"
-        fi
-    done
-    
-    # Set primary display (prefer :1 for Docker, fallback to :0)
-    if echo "$AVAILABLE_DISPLAYS" | grep -q ":1"; then
-        export DISPLAY=":1"
-        print_success "Using preferred Docker display: :1"
-    elif echo "$AVAILABLE_DISPLAYS" | grep -q ":0"; then
-        export DISPLAY=":0"
-        print_success "Using standard display: :0"
-    else
-        # Fallback display selection
-        if [ -n "$DISPLAY" ]; then
-            print_warning "Using existing DISPLAY: $DISPLAY (may not work)"
-        else
-            export DISPLAY=":1"
-            print_warning "No working displays found, using fallback :1"
-        fi
+    print_info "🖥️  Setting up display/auth..."
+
+    # Detect WSLg
+    if [ -d "/mnt/wslg" ] && [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        print_success "WSLg detected (Wayland: $WAYLAND_DISPLAY, DISPLAY: ${DISPLAY:-unset})"
+
+        # WSLg provides these sockets and runtime dir
+        export DISPLAY="${DISPLAY:-:0}"
+        export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+        export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/mnt/wslg/runtime-dir}"
+
+        # Disable xauth for WSLg (not needed)
+        export XAUTH=""
+        unset XAUTHORITY
+
+        print_success "Using WSLg sockets: /mnt/wslg/.X11-unix and runtime-dir"
+        return 0
     fi
-    
-    print_info "Selected DISPLAY: $DISPLAY"
-    
-    # Enhanced XAUTH setup
+
+    # ─────────────────────────────────────────────────────────────
+    # Non-WSLg fallback (your original logic, but fix rm issue)
+    # ─────────────────────────────────────────────────────────────
+    print_warning "WSLg not detected; falling back to X11/xauth setup"
+
     XAUTH_DIR="/tmp/.docker-xauth"
     mkdir -p "$XAUTH_DIR"
     XAUTH="$XAUTH_DIR/xauth-$(whoami)"
-    
-    # Remove and recreate XAUTH file
-    rm -f "$XAUTH"
+
+    rm -rf "$XAUTH"     # important: handles directory or file
     touch "$XAUTH"
-    chmod 666 "$XAUTH"
-    
-    # Test if X11 is working on host
-    if test_display "$DISPLAY"; then
-        print_success "X11 is working on host for $DISPLAY!"
-        
-        # Generate XAUTH entries for all available displays
-        print_info "Generating comprehensive X11 authentication entries..."
-        
-        # Add authentication for current display
-        if xauth nlist "$DISPLAY" 2>/dev/null | head -1 | xauth -f "$XAUTH" nmerge -; then
-            print_success "Added host auth for $DISPLAY"
-        fi
-        
-        # Add localhost entries for container access
-        for disp in $AVAILABLE_DISPLAYS $DISPLAY; do
-            COOKIE=$(openssl rand -hex 32 2>/dev/null || mcookie)
-            
-            # Add entries for various hostname formats
-            xauth -f "$XAUTH" add "$disp" . "$COOKIE" 2>/dev/null || true
-            xauth -f "$XAUTH" add "localhost$disp" . "$COOKIE" 2>/dev/null || true
-            xauth -f "$XAUTH" add "$(hostname)$disp" . "$COOKIE" 2>/dev/null || true
-            xauth -f "$XAUTH" add "unix$disp" . "$COOKIE" 2>/dev/null || true
-        done
-        
-        # Set X11 permissions (allow local connections)
-        if command -v xhost &> /dev/null; then
-            xhost +local:root 2>/dev/null && print_success "X11 permissions set for root"
-            xhost +local:docker 2>/dev/null || true
-            xhost +local: 2>/dev/null || true
-            xhost +SI:localuser:$(whoami) 2>/dev/null || true
-            print_success "Comprehensive X11 permissions configured"
-        fi
-        
-        print_success "X11 authentication properly configured"
-    else
-        print_warning "X11 not working on host - creating fallback auth"
-        
-        # Create minimal fallback auth
-        COOKIE=$(openssl rand -hex 32 2>/dev/null || echo "fallback$(date +%s)")
-        xauth -f "$XAUTH" add "$DISPLAY" . "$COOKIE" 2>/dev/null || true
-        xauth -f "$XAUTH" add "localhost$DISPLAY" . "$COOKIE" 2>/dev/null || true
-        
-        print_info "Created fallback authentication for GUI applications"
-        print_warning "GUI applications may require software rendering"
-    fi
-    
+    chmod 600 "$XAUTH"
+
     export XAUTH
-    print_info "XAUTH file: $XAUTH"
-    
-    # Display XAUTH contents for debugging
-    if [ -f "$XAUTH" ] && [ -s "$XAUTH" ]; then
-        AUTH_COUNT=$(xauth -f "$XAUTH" list 2>/dev/null | wc -l)
-        print_success "✅ X11 authentication configured ($AUTH_COUNT entries)"
-        
-        # Show first few entries for debugging
-        print_info "Auth entries preview:"
-        xauth -f "$XAUTH" list 2>/dev/null | head -3 | sed 's/^/  /'
-    else
-        print_warning "⚠️ X11 authentication file is empty or missing"
-    fi
+    export XAUTHORITY="$XAUTH"
 }
 
 # Function to setup workspace directory
@@ -276,93 +231,144 @@ setup_workspace() {
     fi
 }
 
-# Enhanced container startup with comprehensive graphics support
+# Enhanced container startup with comprehensive graphics support (WSLg-aware + WSL GPU bridge)
 start_persistent_container() {
     print_info "🚀 Starting container with enhanced graphics support: $CONTAINER_NAME"
-    
-    # Get host user information
-    HOST_UID=$(id -u)
-    HOST_GID=$(id -g)
-    HOST_USER=$(whoami)
-    
-    # Comprehensive graphics environment variables
+
+    # Host user info
+    HOST_UID="$(id -u)"
+    HOST_GID="$(id -g)"
+    HOST_USER="$(whoami)"
+
+    # Detect WSLg
+    IS_WSLG=0
+    if [ -d "/mnt/wslg" ] && [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        IS_WSLG=1
+        print_success "WSLg detected (WAYLAND_DISPLAY=${WAYLAND_DISPLAY}, DISPLAY=${DISPLAY})"
+    fi
+
+    # ─────────────────────────────────────────────────────────────
+    # Build graphics flags
+    # ─────────────────────────────────────────────────────────────
     GRAPHICS_ENV=""
-    GRAPHICS_ENV="$GRAPHICS_ENV --env=DISPLAY=${DISPLAY}"
-    GRAPHICS_ENV="$GRAPHICS_ENV --env=XAUTHORITY=${XAUTH}"
-    
-    # Qt6 and GUI environment 
-    GRAPHICS_ENV="$GRAPHICS_ENV --env=QT_QPA_PLATFORM=xcb"
-    GRAPHICS_ENV="$GRAPHICS_ENV --env=QT_X11_NO_MITSHM=1"
+    GRAPHICS_VOLUMES=""
+
+    # Always pass DISPLAY (WSLg exposes Xwayland on :0)
+    GRAPHICS_ENV="$GRAPHICS_ENV --env=DISPLAY=${DISPLAY:-:0}"
+
+    if [ "$IS_WSLG" -eq 1 ]; then
+        # WSLg path: Wayland + Xwayland sockets + runtime dir
+        WSLG_RUNTIME="${XDG_RUNTIME_DIR:-/mnt/wslg/runtime-dir}"
+
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}"
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=XDG_RUNTIME_DIR=${WSLG_RUNTIME}"
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=XDG_SESSION_TYPE=wayland"
+
+        # Prefer Wayland for Qt in WSLg
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=QT_QPA_PLATFORM=wayland"
+
+        # Mount WSLg sockets and runtime
+        GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/mnt/wslg:/mnt/wslg:rw"
+        GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/mnt/wslg/.X11-unix:/tmp/.X11-unix:rw"
+        GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=${WSLG_RUNTIME}:${WSLG_RUNTIME}:rw"
+
+        # WSL GPU bridge (helps avoid llvmpipe for GUI in many setups)
+        if [ -c "/dev/dxg" ]; then
+            GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --device=/dev/dxg"
+            print_info "WSL GPU device (/dev/dxg) mounted"
+        fi
+        if [ -d "/usr/lib/wsl" ]; then
+            GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/usr/lib/wsl:/usr/lib/wsl:ro"
+            GRAPHICS_ENV="$GRAPHICS_ENV --env=LD_LIBRARY_PATH=/usr/lib/wsl/lib:\${LD_LIBRARY_PATH}"
+            print_info "WSL graphics libraries mounted (/usr/lib/wsl)"
+        fi
+
+        # Pass WSLg variables
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}"
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=XDG_RUNTIME_DIR=${WSLG_RUNTIME}"
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=XDG_SESSION_TYPE=wayland"
+
+        # Force D3D12 path for Mesa in WSLg (fixes llvmpipe issues)
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=LD_LIBRARY_PATH=/usr/lib/wsl/lib:\${LD_LIBRARY_PATH}"
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=MESA_LOADER_DRIVER_OVERRIDE=d3d12"
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=GALLIUM_DRIVER=d3d12"
+
+        # IMPORTANT: do NOT mount /dev/dri in WSLg mode (often forces Mesa/llvmpipe)
+    else
+        # Legacy Linux X11 path (xauth)
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=XAUTHORITY=${XAUTH}"
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=XDG_RUNTIME_DIR=/tmp/runtime-user"
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=XDG_SESSION_TYPE=x11"
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=WAYLAND_DISPLAY="
+
+        # X11 Qt backend
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=QT_QPA_PLATFORM=xcb"
+        GRAPHICS_ENV="$GRAPHICS_ENV --env=QT_X11_NO_MITSHM=1"
+
+        # X11 mounts
+        GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/tmp/.X11-unix:/tmp/.X11-unix:rw"
+        GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=${XAUTH}:${XAUTH}:rw"
+
+        # Runtime dir for apps expecting XDG_RUNTIME_DIR
+        mkdir -p /tmp/runtime-user
+        chmod 700 /tmp/runtime-user
+        GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/tmp/runtime-user:/tmp/runtime-user:rw"
+
+        # DRI for native Linux hosts
+        if [ -d "/dev/dri" ]; then
+            GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/dev/dri:/dev/dri:rw"
+            print_info "DRI graphics devices mounted"
+        fi
+    fi
+
+    # Qt common
     GRAPHICS_ENV="$GRAPHICS_ENV --env=QT_AUTO_SCREEN_SCALE_FACTOR=0"
     GRAPHICS_ENV="$GRAPHICS_ENV --env=QT_SCALE_FACTOR=1"
     GRAPHICS_ENV="$GRAPHICS_ENV --env=QT_QPA_PLATFORM_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/qt6/plugins/platforms"
-    
-    # OpenGL and Mesa environment 
+
+    # OpenGL common (do not force software; let stack pick best)
     GRAPHICS_ENV="$GRAPHICS_ENV --env=LIBGL_ALWAYS_INDIRECT=0"
     GRAPHICS_ENV="$GRAPHICS_ENV --env=LIBGL_ALWAYS_SOFTWARE=0"
-    GRAPHICS_ENV="$GRAPHICS_ENV --env=MESA_GL_VERSION_OVERRIDE=4.5"
-    GRAPHICS_ENV="$GRAPHICS_ENV --env=MESA_GLSL_VERSION_OVERRIDE=450"
-    GRAPHICS_ENV="$GRAPHICS_ENV --env=GALLIUM_DRIVER=llvmpipe"
-    
-    # X11 and graphics system environment
-    GRAPHICS_ENV="$GRAPHICS_ENV --env=XDG_RUNTIME_DIR=/tmp/runtime-user"
-    GRAPHICS_ENV="$GRAPHICS_ENV --env=XDG_SESSION_TYPE=x11"
-    GRAPHICS_ENV="$GRAPHICS_ENV --env=WAYLAND_DISPLAY="
-    
-    # Other important environment variables
+
+    # Terminal / colors
     GRAPHICS_ENV="$GRAPHICS_ENV --env=TERM=xterm-256color"
     GRAPHICS_ENV="$GRAPHICS_ENV --env=COLORTERM=truecolor"
     GRAPHICS_ENV="$GRAPHICS_ENV --env=FORCE_COLOR=1"
     GRAPHICS_ENV="$GRAPHICS_ENV --env=CLICOLOR_FORCE=1"
-    
-    # Comprehensive volume mounts for graphics
-    GRAPHICS_VOLUMES=""
-    GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/tmp/.X11-unix:/tmp/.X11-unix:rw"
-    GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=${XAUTH}:${XAUTH}:rw"
-    
-    # Mount graphics devices and libraries
-    if [ -d "/dev/dri" ]; then
-        GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/dev/dri:/dev/dri:rw"
-        print_info "DRI graphics devices mounted"
-    fi
-    
-    # Mount NVIDIA devices if available
+
+    # NVIDIA device nodes (optional; --gpus all usually enough, but harmless)
     if [ -c "/dev/nvidia0" ]; then
         GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/dev/nvidia0:/dev/nvidia0:rw"
         GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/dev/nvidiactl:/dev/nvidiactl:rw"
         GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/dev/nvidia-modeset:/dev/nvidia-modeset:rw"
         print_info "NVIDIA devices mounted"
     fi
-    
-    # Mount shared libraries for graphics
-    if [ -d "/usr/share/glvnd" ]; then
+
+    # Optional shared libs (native Linux hosts; typically unnecessary on WSLg)
+    if [ "$IS_WSLG" -eq 0 ] && [ -d "/usr/share/glvnd" ]; then
         GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/usr/share/glvnd:/usr/share/glvnd:ro"
     fi
-    
-    if [ -d "/usr/lib/x86_64-linux-gnu/dri" ]; then
+    if [ "$IS_WSLG" -eq 0 ] && [ -d "/usr/lib/x86_64-linux-gnu/dri" ]; then
         GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/usr/lib/x86_64-linux-gnu/dri:/usr/lib/x86_64-linux-gnu/dri:ro"
     fi
-    
-    # Create and mount runtime directory
-    mkdir -p /tmp/runtime-user
-    chmod 700 /tmp/runtime-user
-    GRAPHICS_VOLUMES="$GRAPHICS_VOLUMES --volume=/tmp/runtime-user:/tmp/runtime-user:rw"
-    
-    # Start container with comprehensive configuration
+
+    # ─────────────────────────────────────────────────────────────
+    # Start container
+    # ─────────────────────────────────────────────────────────────
     docker run -d \
-        --name=${CONTAINER_NAME} \
+        --name="${CONTAINER_NAME}" \
         --hostname=ros2-dev \
         --network host \
         --privileged \
-        $GRAPHICS_ENV \
+        ${GRAPHICS_ENV} \
         --env="CONTAINER_NAME=${CONTAINER_NAME}" \
-        -e LOCAL_USER_ID="$HOST_UID" \
-        -e LOCAL_GROUP_ID="$HOST_GID" \
-        -e HOST_USER="$HOST_USER" \
+        -e LOCAL_USER_ID="${HOST_UID}" \
+        -e LOCAL_GROUP_ID="${HOST_GID}" \
+        -e HOST_USER="${HOST_USER}" \
         -e FASTRTPS_DEFAULT_PROFILES_FILE=/usr/local/share/middleware_profiles/rtps_udp_profile.xml \
-        $GRAPHICS_VOLUMES \
+        ${GRAPHICS_VOLUMES} \
         --volume="/etc/localtime:/etc/localtime:ro" \
-        --mount="type=bind,source=$WORKSPACE_DIR,target=/home/user/shared_volume" \
+        --mount="type=bind,source=${WORKSPACE_DIR},target=/home/user/shared_volume" \
         --volume="/dev:/dev:rw" \
         --workdir /home/user/shared_volume \
         --security-opt seccomp=unconfined \
@@ -372,74 +378,84 @@ start_persistent_container() {
         --ipc=host \
         --shm-size=1g \
         --tmpfs /tmp:exec \
-        $DOCKER_OPTS \
-        ${IMAGE_NAME} \
+        ${DOCKER_OPTS} \
+        "${IMAGE_NAME}" \
         tail -f /dev/null
-    
-    # Wait for container to be ready
+
     sleep 3
-    
-    # Check if container is running
-    if [ "$(docker ps -q -f name=${CONTAINER_NAME})" ]; then
+
+    if [ "$(docker ps -q -f name="${CONTAINER_NAME}")" ]; then
         print_success "Container started successfully in persistent mode"
-        
-        # Test graphics environment inside container
+
         print_info "Testing graphics environment inside container..."
-        
-        # Test X11 connection
-        if docker exec ${CONTAINER_NAME} bash -c "timeout 5 xset q" 2>/dev/null; then
+
+        # X11 test (works in WSLg too via Xwayland)
+        if docker exec "${CONTAINER_NAME}" bash -lc "timeout 5 xset q" >/dev/null 2>&1; then
             print_success "✅ X11 connection working inside container!"
         else
-            print_warning "⚠️ X11 connection test failed, but container will auto-detect"
+            print_warning "⚠️ X11 connection test failed"
         fi
-        
-        # Test OpenGL support
+
+        # OpenGL test (may still show non-NVIDIA on WSLg; Vulkan is the better indicator)
         print_info "Testing OpenGL support..."
-        if docker exec ${CONTAINER_NAME} bash -c "timeout 10 glxinfo -B" 2>/dev/null | grep -q "OpenGL"; then
-            RENDERER=$(docker exec ${CONTAINER_NAME} bash -c "glxinfo -B 2>/dev/null | grep 'OpenGL renderer'" | cut -d: -f2 | xargs)
-            print_success "✅ OpenGL working: $RENDERER"
+        if docker exec "${CONTAINER_NAME}" bash -lc "timeout 10 glxinfo -B" 2>/dev/null | grep -q "OpenGL"; then
+            RENDERER="$(docker exec "${CONTAINER_NAME}" bash -lc "glxinfo -B 2>/dev/null | grep 'OpenGL renderer' | cut -d: -f2 | xargs")"
+            print_success "✅ OpenGL working: ${RENDERER}"
         else
-            print_warning "⚠️ OpenGL test inconclusive, software rendering will be used"
+            print_warning "⚠️ OpenGL test inconclusive"
         fi
-        
-        # Test Qt6 environment
+
+        # Vulkan test (more meaningful on WSLg)
+        if docker exec "${CONTAINER_NAME}" bash -lc "command -v vulkaninfo >/dev/null && timeout 10 vulkaninfo --summary >/dev/null 2>&1"; then
+            print_success "✅ Vulkan available (good sign for WSLg acceleration)"
+        else
+            print_warning "⚠️ Vulkan not available or not working"
+        fi
+
+        # Qt6 check
         print_info "Testing Qt6 environment..."
-        if docker exec ${CONTAINER_NAME} bash -c "find /usr -name '*qt6*' -name '*platforms*' 2>/dev/null | head -1" | grep -q platforms; then
+        if docker exec "${CONTAINER_NAME}" bash -lc "find /usr -path '*qt6*platforms*' -type d 2>/dev/null | head -1" | grep -q platforms; then
             print_success "✅ Qt6 platform plugins detected"
         else
             print_warning "⚠️ Qt6 platform plugins not found in expected location"
         fi
-        
+
         print_success "🎉 Container fully initialized with graphics support"
         return 0
     else
         print_error "Failed to start container"
-        docker logs ${CONTAINER_NAME}
+        docker logs "${CONTAINER_NAME}"
         return 1
     fi
 }
 
+
+
 # Function to connect to running container
 connect_to_container() {
     print_info "🔗 Connecting to container: ${CONTAINER_NAME}"
-    
-    # Enhanced command setup with graphics environment
+
+    # Capture host display vars (WSLg)
+    HOST_DISPLAY="${DISPLAY:-:0}"
+    HOST_WAYLAND="${WAYLAND_DISPLAY:-wayland-0}"
+    HOST_XDG_RUNTIME="${XDG_RUNTIME_DIR:-/mnt/wslg/runtime-dir}"
+
     BASE_CMD="export DEV_DIR=/home/user/shared_volume && \
         export PX4_DIR=\$DEV_DIR/PX4-Autopilot && \
         export ROS2_WS=\$DEV_DIR/ros2_ws && \
         export OSQP_SRC=\$DEV_DIR && \
-        export QT_QPA_PLATFORM=xcb && \
-        export LIBGL_ALWAYS_INDIRECT=0 && \
         cd /home/user/shared_volume && \
         source /home/user/.bashrc"
-    
-    CMD="$BASE_CMD && /bin/bash"
-    
-    # Connect to container with graphics support
+
+    # IMPORTANT: do NOT use -l (login shell), it may reset WAYLAND_DISPLAY/XDG_RUNTIME_DIR
     docker exec --user user --workdir /home/user/shared_volume -it ${CONTAINER_NAME} \
-        env TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1 \
-        QT_QPA_PLATFORM=xcb LIBGL_ALWAYS_INDIRECT=0 \
-        bash -l -c "${CMD}"
+        env \
+          DISPLAY="${HOST_DISPLAY}" \
+          WAYLAND_DISPLAY="${HOST_WAYLAND}" \
+          XDG_RUNTIME_DIR="${HOST_XDG_RUNTIME}" \
+          XDG_SESSION_TYPE="wayland" \
+          TERM=xterm-256color COLORTERM=truecolor FORCE_COLOR=1 \
+        bash -c "${BASE_CMD} && exec bash"
 }
 
 # Function to run or connect to container
@@ -591,6 +607,7 @@ main() {
     echo
     
     show_system_info
+    setup_wsl_docker_config
     check_docker
     
     if check_image_exists; then
