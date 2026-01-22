@@ -4,7 +4,7 @@
 
 FROM osrf/ros:jazzy-desktop
 
-LABEL maintainer="AbdullahGM1 <agm.musalami@gmail.com>"
+LABEL maintainer="asmbatati <asmalbatati@hotmail.com>"
 LABEL description="ROS2 Jazzy + Gazebo Harmonic + PX4 v1.15.4 + MAVROS + ROSA)"
 
 # ============================================================================
@@ -481,8 +481,9 @@ RUN pip3 install --break-system-packages --ignore-installed --no-cache-dir \
 # ============================================================================
 # PHASE 14: Ollama Installation + LLM Models
 # ============================================================================
-RUN apt-get update && apt-get install -y --no-install-recommends zstd \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates zstd gawk grep sed coreutils findutils tar \
+  && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://ollama.com/install.sh | sh
 
 # ============================================================================
@@ -492,21 +493,21 @@ RUN curl -fsSL https://ollama.com/install.sh | sh
 #
 # Pull Qwen3:8b and Qwen2.5vl:7b models using Ollama (only if they don't already exist)
 #
-# RUN ollama serve & \
-#     sleep 15 && \
-#     echo "Checking if qwen3:8b is available..." && \
-#     if ollama pull qwen3:8b; then \
-#         echo "Successfully pulled qwen3:8b"; \
-#     else \
-#         echo "Model qwen3:8b not available or failed to pull, continuing..."; \
-#     fi && \
-#     echo "Checking if qwen2.5vl:7b is available..." && \
-#     if ollama pull qwen2.5vl:7b; then \
-#         echo "Successfully pulled qwen2.5vl:7b"; \
-#     else \
-#         echo "Model qwen2.5vl:7b not available or failed to pull, continuing..."; \
-#     fi && \
-#     pkill ollama
+RUN ollama serve & \
+    sleep 15 && \
+    echo "Checking if qwen3:8b is available..." && \
+    if ollama pull qwen3:8b; then \
+        echo "Successfully pulled qwen3:8b"; \
+    else \
+        echo "Model qwen3:8b not available or failed to pull, continuing..."; \
+    fi && \
+    echo "Checking if qwen2.5vl:7b is available..." && \
+    if ollama pull qwen2.5vl:7b; then \
+        echo "Successfully pulled qwen2.5vl:7b"; \
+    else \
+        echo "Model qwen2.5vl:7b not available or failed to pull, continuing..."; \
+    fi && \
+    pkill ollama
 
 # ============================================================================
 # PHASE 15: Graphics Environment Verification
@@ -541,29 +542,46 @@ RUN mkdir -p /home/user/ros2_ws/src
 # GitHub token for private repository access (optional)
 ARG GITHUB_TOKEN
 
-# Clone ros2_agent_sim with robust submodule handling (only if token provided)
+# Clone ros2_agent_sim with automatic public/private fallback and robust submodule handling
 RUN cd /home/user/ros2_ws/src && \
-    if [ -n "$GITHUB_TOKEN" ]; then \
-    echo "=== GitHub token provided, cloning ros2_agent_sim ==="; \
-    git clone https://${GITHUB_TOKEN}@github.com/AbdullahGM1/ros2_agent_sim.git && \
+    echo "=== Attempting to clone ros2_agent_sim ===" && \
+    \
+    # Try public clone first, then private with token if it fails
+    if git clone https://github.com/asmbatati/ros2_agent_sim.git 2>/dev/null; then \
+        echo "✅ Public clone succeeded"; \
+    elif [ -n "$GITHUB_TOKEN" ]; then \
+        echo "🔐 Public clone failed, attempting with provided token"; \
+        git clone https://x-access-token:${GITHUB_TOKEN}@github.com/asmbatati/ros2_agent_sim.git; \
+    else \
+        echo "❌ Clone failed and no GitHub token provided"; \
+        echo "   For private repos, build with: --build-arg GITHUB_TOKEN=your_token"; \
+        exit 1; \
+    fi && \
+    \
+    # Robust submodule initialization
     cd ros2_agent_sim && \
-    echo "=== Initializing submodules with error handling ===" && \
+    echo "=== Initializing submodules ===" && \
     git submodule init && \
-    for submodule in $(git submodule status | awk '{print $2}'); do \
-    echo "Processing submodule: $submodule"; \
-    if git submodule update "$submodule"; then \
-    echo "✅ Successfully updated $submodule"; \
-    else \
-    echo "⚠️ Failed to update $submodule, trying to reset to HEAD"; \
-    cd "$submodule" 2>/dev/null && git fetch origin && git reset --hard origin/HEAD && cd .. || \
-    echo "❌ Submodule $submodule failed - continuing without it"; \
-    fi; \
+    \
+    # Process each submodule with error recovery
+    git submodule status | awk '{print $2}' | while read -r submodule; do \
+        echo "📦 Processing submodule: $submodule"; \
+        if git submodule update --init --recursive "$submodule" 2>/dev/null; then \
+            echo "✅ Successfully updated $submodule"; \
+        else \
+            echo "⚠️ Initial update failed for $submodule, attempting recovery"; \
+            if [ -d "$submodule" ] && cd "$submodule" 2>/dev/null; then \
+                git fetch origin 2>/dev/null && \
+                git reset --hard origin/HEAD 2>/dev/null && \
+                cd ..; \
+                echo "✅ Recovered $submodule"; \
+            else \
+                echo "⚠️ Could not recover $submodule - skipping"; \
+            fi; \
+        fi; \
     done && \
-    echo "✅ Submodule initialization completed"; \
-    else \
-    echo "⚠️ No GitHub token provided, skipping ros2_agent_sim clone"; \
-    echo "   To include ros2_agent_sim, build with: --build-arg GITHUB_TOKEN=your_token"; \
-    fi
+    \
+    echo "✅ Repository and submodules setup completed"
 
 # Clone, configure, and build the PX4-Autopilot firmware
 RUN set -e && \
@@ -581,21 +599,21 @@ RUN set -e && \
 
 # Clone MAVLINK repository
 RUN cd /home/user/ros2_ws/src && \
-    git clone https://github.com/AbdullahGM1/mavlink-gbp-release.git mavlink && \
+    git clone https://github.com/ros2-gbp/mavlink-gbp-release.git mavlink && \
     cd mavlink && \
     git checkout release/jazzy/mavlink && \
     echo "✅ MAVLINK Package Cloned"
 
 # Clone MAVROS repository
 RUN cd /home/user/ros2_ws/src && \
-    git clone https://github.com/AbdullahGM1/mavros.git && \
+    git clone https://github.com/mavlink/mavros.git && \
     cd mavros && \
     git checkout ros2 && \
     echo "✅ MAVROS Package Cloned"
 
 # Clone Unitree repository
 RUN cd /home/user/ros2_ws/src && \
-    git clone https://github.com/AbdullahGM1/unitree_go2_ros2.git && \
+    git clone https://github.com/khaledgabr77/unitree_go2_ros2.git && \
     cd unitree_go2_ros2 && \
     echo "✅ Unitree Package Cloned"
 
