@@ -139,7 +139,7 @@ The ROSA Agent serves as the central decision-making brain, utilizing:
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/AbdullahGM1/ros2_agent_sim_docker.git
+git clone https://github.com/asmbatati/ros2_agent_sim_docker.git
 cd ros2-agent-sim-docker
 ```
 
@@ -194,10 +194,10 @@ After completing the installation steps above, follow these steps to set up the 
 ### 1. Clone the ROS2 Agent Simulation Package
 ```bash
 cd ~/ros2_ws/src/
-git clone --recursive https://github.com/AbdullahGM1/ros2_agent_sim.git
+git clone --recursive https://github.com/asmbatati/ros2_agent_sim.git
 ```
 
-This package ([ros2_agent_sim](https://github.com/AbdullahGM1/ros2_agent_sim)) contains:
+This package ([ros2_agent_sim](https://github.com/asmbatati/ros2_agent_sim)) contains:
 - ROS2 Agent Package - For LLM-based robot interaction
 - Simulation environment - Integrated with PX4 for drone simulation
 
@@ -319,9 +319,15 @@ This project builds upon the excellent work of:
 
 - [ROSA (NASA JPL)](https://github.com/nasa-jpl/rosa) - ROS Agent task planning framework
 - [smart_track Docker Environment](https://github.com/mzahana/smart_track/tree/main/docker) by [Mohammed Abdelkader](https://github.com/mzahana)
+- [ros2_agent_sim](https://github.com/AbdullahGM1/ros2_agent_sim_docker) by [Abdullah Al-Musalami](https://github.com/AbdullahGM1)
 
-Special thanks to [Mohammed Abdelkader](https://github.com/mzahana) for providing the foundational Docker configurations and ROS2-PX4 integration scripts that made this project possible.
+Special thanks to Abdullah Al-Musalami
+🔗 https://github.com/AbdullahGM1
 
+for initiating the project and laying the foundational work that enabled its development.
+
+This work was developed at the Robotics & IoT Lab (RIOTU), part of the Research & Innovation Center at Prince Sultan University
+🔗 https://ric.psu.edu.sa/riotu/
 
 ## 📝 License
 
@@ -329,7 +335,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Contact
 
-Abdullah GM - [@AbdullahGM1](https://github.com/AbdullahGM1) - agm.musalami@gmail.com
+Abdulrahman S. Al-Batati - [@asmbatati](https://github.com/asmbatati) - agm.musalami@gmail.com
 
 ## 📚 Additional Resources
 
@@ -339,13 +345,9 @@ Abdullah GM - [@AbdullahGM1](https://github.com/AbdullahGM1) - agm.musalami@gmai
 - [NASA ROSA Repository](https://github.com/nasa-jpl/rosa)
 - [Ollama Documentation](https://github.com/ollama/ollama)
 - [LangChain Documentation](https://python.langchain.com/)
-- [ROS2 Agent Simulation](https://github.com/AbdullahGM1/ros2_agent_sim) - The simulation and agent package used in this project
+- [ROS2 Agent Simulation](https://github.com/asmbatati/ros2_agent_sim) - The simulation and agent package used in this project
 - [Qt6 Documentation](https://doc.qt.io/qt-6/) - For Qt6 platform and graphics information
 - [Ubuntu 24.04 Release Notes](https://wiki.ubuntu.com/NobleNumbat/ReleaseNotes) - Ubuntu 24.04 compatibility information
 
 ---
 
-<div align="center">
-    <strong>FIXED VERSION with Ubuntu 24.04 Support & Enhanced Graphics</strong><br>
-    Made with ❤️ by <a href="https://github.com/AbdullahGM1">Abdullah GM</a>
-</div>
