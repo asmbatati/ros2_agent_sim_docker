@@ -652,6 +652,9 @@ build_workspace() {
     
     # Function to attempt build with specific strategy
     attempt_build() {
+    # Ensure git trusts the directory (fix for setuptools scm)
+    git config --global --add safe.directory '*' || true
+
         local strategy="$1"
         local timeout_duration="$2"
         

@@ -66,6 +66,18 @@ else
 fi
 
 # ========================================================================
+# Git Configuration
+# ========================================================================
+
+print_info "Configuring Git to trust all directories..."
+if command -v git >/dev/null 2>&1; then
+    sudo -u user git config --global --add safe.directory '*'
+    print_success "Git configured to ignore dubious ownership"
+else
+    print_warning "Git not found, skipping configuration"
+fi
+
+# ========================================================================
 # Comprehensive X11 Display Auto-Detection
 # ========================================================================
 

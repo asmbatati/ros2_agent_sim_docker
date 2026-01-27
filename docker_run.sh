@@ -377,7 +377,6 @@ start_persistent_container() {
         --cap-add=SYS_ADMIN \
         --ipc=host \
         --shm-size=1g \
-        --tmpfs /tmp:exec \
         ${DOCKER_OPTS} \
         "${IMAGE_NAME}" \
         tail -f /dev/null
@@ -458,6 +457,26 @@ connect_to_container() {
         bash -c "${BASE_CMD} && exec bash"
 }
 
+# Function to sync files to container
+sync_files() {
+    print_info "🔄 Syncing configuration files to container..."
+    
+    if [ -f "scripts/install.sh" ]; then
+        docker cp scripts/install.sh "${CONTAINER_NAME}:/home/user/backup/"
+        # Also sync to shared volume to fix the 'stale script' issue
+        docker cp scripts/install.sh "${CONTAINER_NAME}:/home/user/shared_volume/"
+        print_success "Synced install.sh"
+    fi
+    
+    if [ -d "PX4_config" ]; then
+        docker cp PX4_config "${CONTAINER_NAME}:/home/user/backup/"
+        print_success "Synced PX4_config"
+    fi
+    
+    # Fix ownership
+    docker exec -u root "${CONTAINER_NAME}" chown -R user:user /home/user/backup /home/user/shared_volume/install.sh 2>/dev/null || true
+}
+
 # Function to run or connect to container
 run_container() {
     print_info "🐳 Managing container: $CONTAINER_NAME"
@@ -468,18 +487,21 @@ run_container() {
         if [ "$(docker ps -q -f name=${CONTAINER_NAME})" ]; then
             # Container is running, connect to it
             print_info "Container is already running"
+            sync_files
             connect_to_container
         else
             # Container exists but stopped, start it
             print_info "Starting stopped container..."
             docker start ${CONTAINER_NAME}
             sleep 3
+            sync_files
             connect_to_container
         fi
     else
         # Container doesn't exist, create and start it
         print_info "Creating new persistent container..."
         if start_persistent_container; then
+            sync_files
             connect_to_container
         else
             print_error "Failed to create container"
