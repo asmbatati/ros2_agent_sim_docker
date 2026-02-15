@@ -685,7 +685,7 @@ build_workspace() {
             "selective")
                 # Build only essential packages first
                 timeout "$timeout_duration" colcon build \
-                    --packages-select px4_msgs mavros mavros_msgs \
+                    --packages-select px4_msgs mavlink libmavconn mavros_msgs mavros \
                     --executor sequential \
                     --event-handlers console_direct+ \
                     --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -Wno-dev
